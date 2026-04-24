@@ -1,79 +1,92 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useSendTransaction, useAccount } from 'wagmi';
+import { encodeFunctionData } from 'viem';
 import { MINDVAULT_ROUTER_ADDRESS, MINDVAULT_ROUTER_ABI } from '@/lib/contracts';
 
-export type TxState =
+// Canonical async TX states from ritual-dapp-frontend skill.
+// writeContractAsync CANNOT be used here — it runs eth_call simulation which
+// fails on any function that internally calls an async precompile.
+// useSendTransaction + encodeFunctionData skips simulation entirely.
+export type AsyncTxStatus =
   | 'IDLE'
-  | 'ENCRYPTING'
   | 'SUBMITTING'
-  | 'PENDING'
-  | 'CONFIRMED'
-  | 'PROCESSING'
-  | 'CALLBACK_RECEIVED'
-  | 'DECRYPTING'
-  | 'COMPLETE'
-  | 'TX_FAILED'
-  | 'AGENT_TIMEOUT'
-  | 'DECRYPT_FAILED';
+  | 'PENDING_COMMITMENT'
+  | 'COMMITTED'
+  | 'EXECUTOR_PROCESSING'
+  | 'RESULT_READY'
+  | 'PENDING_SETTLEMENT'
+  | 'SETTLED'
+  | 'FAILED'
+  | 'EXPIRED';
 
 export function useMindVault() {
   const { address } = useAccount();
-  const [txState, setTxState] = useState<TxState>('IDLE');
-  const [currentJobId, setCurrentJobId] = useState<`0x${string}` | null>(null);
+  const [status, setStatus] = useState<AsyncTxStatus>('IDLE');
+  const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
 
-  const sendEncryptedMessage = useCallback(
-    async (sessionId: `0x${string}`, encryptedPayload: `0x${string}`) => {
+  const sendMessage = useCallback(
+    async (sessionId: `0x${string}`, agentInput: `0x${string}`) => {
       if (!address) throw new Error('Wallet not connected');
 
-      setTxState('SUBMITTING');
+      setStatus('SUBMITTING');
+      setError(null);
+
       try {
-        const hash = await writeContractAsync({
-          address: MINDVAULT_ROUTER_ADDRESS,
+        // encodeFunctionData + sendTransaction skips wagmi's simulateContract,
+        // which would fail with "call to non-contract address" on the precompile.
+        const data = encodeFunctionData({
           abi: MINDVAULT_ROUTER_ABI,
           functionName: 'sendMessage',
-          args: [sessionId, encryptedPayload],
+          args: [sessionId, agentInput],
         });
 
-        setTxState('PENDING');
+        const hash = await sendTransactionAsync({
+          to: MINDVAULT_ROUTER_ADDRESS,
+          data,
+          gas: 2_000_000n,
+        });
+
+        setTxHash(hash);
+        setStatus('PENDING_COMMITMENT');
         return hash;
-      } catch (err) {
-        setTxState('TX_FAILED');
+      } catch (err: any) {
+        setStatus('FAILED');
+        setError(err?.message ?? 'Transaction failed');
         throw err;
       }
     },
-    [address, writeContractAsync],
+    [address, sendTransactionAsync],
   );
 
-  const onTxConfirmed = useCallback(() => setTxState('CONFIRMED'), []);
-  const onAgentProcessing = useCallback(() => setTxState('PROCESSING'), []);
-  const onCallbackReceived = useCallback((jobId: `0x${string}`) => {
-    setCurrentJobId(jobId);
-    setTxState('CALLBACK_RECEIVED');
-  }, []);
-  const onDecrypting = useCallback(() => setTxState('DECRYPTING'), []);
-  const onComplete = useCallback(() => setTxState('COMPLETE'), []);
-  const onDecryptFailed = useCallback(() => setTxState('DECRYPT_FAILED'), []);
-  const onTimeout = useCallback(() => setTxState('AGENT_TIMEOUT'), []);
-  const reset = useCallback(() => {
-    setTxState('IDLE');
-    setCurrentJobId(null);
-  }, []);
+  // State transition helpers — called by consumers as lifecycle events arrive
+  const onCommitted  = useCallback(() => setStatus('COMMITTED'), []);
+  const onProcessing = useCallback(() => setStatus('EXECUTOR_PROCESSING'), []);
+  const onResultReady = useCallback(() => setStatus('RESULT_READY'), []);
+  const onPendingSettlement = useCallback(() => setStatus('PENDING_SETTLEMENT'), []);
+  const onSettled   = useCallback(() => setStatus('SETTLED'), []);
+  const onFailed    = useCallback((msg: string) => { setStatus('FAILED'); setError(msg); }, []);
+  const onExpired   = useCallback(() => setStatus('EXPIRED'), []);
+  const reset       = useCallback(() => { setStatus('IDLE'); setTxHash(null); setError(null); }, []);
 
   return {
-    txState,
-    currentJobId,
-    sendEncryptedMessage,
-    onTxConfirmed,
-    onAgentProcessing,
-    onCallbackReceived,
-    onDecrypting,
-    onComplete,
-    onDecryptFailed,
-    onTimeout,
+    status,
+    txHash,
+    error,
+    isIdle: status === 'IDLE',
+    isBusy: !['IDLE', 'SETTLED', 'FAILED', 'EXPIRED'].includes(status),
+    sendMessage,
+    onCommitted,
+    onProcessing,
+    onResultReady,
+    onPendingSettlement,
+    onSettled,
+    onFailed,
+    onExpired,
     reset,
   };
 }

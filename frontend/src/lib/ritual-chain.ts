@@ -2,12 +2,11 @@ import { defineChain } from 'viem';
 
 export const ritualChain = defineChain({
   id: 1979,
-  name: 'Ritual Chain',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  name: 'Ritual',
+  nativeCurrency: { name: 'RITUAL', symbol: 'RITUAL', decimals: 18 },
   rpcUrls: {
     default: {
-      http: ['https://rpc.ritualfoundation.org'],
-      webSocket: ['wss://rpc.ritualfoundation.org'],
+      http: [process.env.NEXT_PUBLIC_RPC_URL ?? 'https://rpc.ritualfoundation.org'],
     },
   },
   blockExplorers: {

@@ -5,30 +5,40 @@ export const MINDVAULT_ROUTER_ADDRESS = (
 export const MINDVAULT_ROUTER_ABI = [
   {
     type: 'constructor',
-    inputs: [{ name: '_agentId', type: 'bytes32' }],
+    inputs: [],
     stateMutability: 'nonpayable',
   },
+  // ── Write ─────────────────────────────────────────────────────────────────
   {
     type: 'function',
     name: 'sendMessage',
     inputs: [
-      { name: 'sessionId', type: 'bytes32' },
-      { name: 'encryptedMessage', type: 'bytes' },
+      { name: 'sessionId',  type: 'bytes32' },
+      // agentInput: full 23-field ABI-encoded Sovereign Agent params
+      // built by lib/sovereign-agent.ts encodeSovereignAgentInput()
+      { name: 'agentInput', type: 'bytes'   },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
   {
     type: 'function',
-    name: 'onAgentResponse',
+    name: 'onSovereignAgentResult',
     inputs: [
-      { name: 'jobId', type: 'bytes32' },
-      { name: 'sessionId', type: 'bytes32' },
-      { name: 'encryptedResponse', type: 'bytes' },
+      { name: 'jobId',  type: 'bytes32' },
+      { name: 'result', type: 'bytes'   },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
   },
+  {
+    type: 'function',
+    name: 'deposit',
+    inputs: [{ name: 'lockDuration', type: 'uint256' }],
+    outputs: [],
+    stateMutability: 'payable',
+  },
+  // ── Read ──────────────────────────────────────────────────────────────────
   {
     type: 'function',
     name: 'getUserSessions',
@@ -45,10 +55,10 @@ export const MINDVAULT_ROUTER_ABI = [
         name: '',
         type: 'tuple',
         components: [
-          { name: 'user', type: 'address' },
-          { name: 'startedAt', type: 'uint256' },
+          { name: 'user',         type: 'address' },
+          { name: 'startedAt',    type: 'uint256' },
           { name: 'messageCount', type: 'uint256' },
-          { name: 'latestJobId', type: 'bytes32' },
+          { name: 'latestJobId',  type: 'bytes32' },
         ],
       },
     ],
@@ -56,36 +66,46 @@ export const MINDVAULT_ROUTER_ABI = [
   },
   {
     type: 'function',
-    name: 'agentId',
+    name: 'hasPendingJob',
     inputs: [],
-    outputs: [{ name: '', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bool' }],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'fulfilled',
+    inputs: [{ name: 'jobId', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  // ── Events ────────────────────────────────────────────────────────────────
+  {
+    type: 'event',
+    name: 'SessionCreated',
+    inputs: [
+      { name: 'user',      type: 'address', indexed: true  },
+      { name: 'sessionId', type: 'bytes32', indexed: true  },
+    ],
   },
   {
     type: 'event',
     name: 'MessageSent',
     inputs: [
-      { name: 'user', type: 'address', indexed: true },
-      { name: 'sessionId', type: 'bytes32', indexed: true },
-      { name: 'jobId', type: 'bytes32', indexed: false },
+      { name: 'user',      type: 'address', indexed: true  },
+      { name: 'sessionId', type: 'bytes32', indexed: true  },
+      { name: 'jobId',     type: 'bytes32', indexed: false },
       { name: 'timestamp', type: 'uint256', indexed: false },
     ],
   },
   {
     type: 'event',
-    name: 'ResponseReceived',
+    name: 'AgentResponse',
     inputs: [
-      { name: 'user', type: 'address', indexed: true },
-      { name: 'sessionId', type: 'bytes32', indexed: true },
-      { name: 'encryptedResponse', type: 'bytes', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'SessionCreated',
-    inputs: [
-      { name: 'user', type: 'address', indexed: true },
-      { name: 'sessionId', type: 'bytes32', indexed: true },
+      { name: 'jobId',     type: 'bytes32', indexed: true  },
+      { name: 'sessionId', type: 'bytes32', indexed: true  },
+      { name: 'success',   type: 'bool',    indexed: false },
+      { name: 'text',      type: 'string',  indexed: false },
+      { name: 'error',     type: 'string',  indexed: false },
     ],
   },
 ] as const;

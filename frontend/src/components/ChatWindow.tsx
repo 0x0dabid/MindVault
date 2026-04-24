@@ -6,9 +6,12 @@ import { keccak256, encodePacked } from 'viem';
 import { MessageBubble, Message } from './MessageBubble';
 import { TxStateIndicator } from './TxStateIndicator';
 import { SessionList } from './SessionList';
+import { ChainGuard } from './ChainGuard';
 import { useMindVault } from '@/hooks/useMindVault';
 import { useEncryption } from '@/hooks/useEncryption';
 import { useAgentResponse } from '@/hooks/useAgentResponse';
+import { useExecutor } from '@/hooks/useExecutor';
+import { encodeSovereignAgentInput } from '@/lib/sovereign-agent';
 
 let messageCounter = 0;
 function newId() {
@@ -24,21 +27,21 @@ export function ChatWindow() {
   const [pendingTxHash, setPendingTxHash] = useState<`0x${string}` | undefined>();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const { txState, sendEncryptedMessage, onTxConfirmed, onAgentProcessing, onCallbackReceived, onDecrypting, onComplete, onDecryptFailed, reset } = useMindVault();
-  const { encrypt, decrypt, keysReady, deriveKeys } = useEncryption();
+  const { status, sendMessage, onCommitted, onProcessing, onPendingSettlement, onSettled, onFailed, reset } = useMindVault();
+  const { encrypt, decrypt, keysReady, deriveKeys, derivedPublicKey } = useEncryption();
+  const { executor } = useExecutor();
 
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: pendingTxHash });
 
   useEffect(() => {
     if (txConfirmed) {
-      onTxConfirmed();
-      onAgentProcessing();
+      onCommitted();
+      onProcessing();
     }
-  }, [txConfirmed, onTxConfirmed, onAgentProcessing]);
+  }, [txConfirmed, onCommitted, onProcessing]);
 
   useAgentResponse(activeSessionId ?? undefined, async (event) => {
-    onCallbackReceived(event.encryptedResponse as `0x${string}`);
-    onDecrypting();
+    onPendingSettlement();
 
     const placeholderId = newId();
     setMessages((prev) => [
@@ -47,18 +50,26 @@ export function ChatWindow() {
     ]);
 
     try {
-      const content = await decrypt(event.encryptedResponse);
+      // If derivedPublicKey was passed to the agent, response text is ECIES-encrypted
+      let content = event.text;
+      if (!event.success) {
+        content = `[Agent error: ${event.error || 'unknown'}]`;
+      } else if (derivedPublicKey && event.text.startsWith('0x')) {
+        content = await decrypt(event.text);
+      }
       setMessages((prev) =>
         prev.map((m) => (m.id === placeholderId ? { ...m, content, status: 'ready' } : m)),
       );
-      onComplete();
+      onSettled();
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === placeholderId ? { ...m, content: 'Failed to decrypt response.', status: 'error' } : m,
+          m.id === placeholderId
+            ? { ...m, content: 'Failed to decrypt response.', status: 'error' }
+            : m,
         ),
       );
-      onDecryptFailed();
+      onFailed('Decrypt failed');
     }
   });
 
@@ -68,8 +79,7 @@ export function ChatWindow() {
 
   const startNewSession = useCallback(() => {
     if (!address) return;
-    const idx = sessionIndex;
-    const id = keccak256(encodePacked(['address', 'uint256'], [address, BigInt(idx)]));
+    const id = keccak256(encodePacked(['address', 'uint256'], [address, BigInt(sessionIndex)]));
     setActiveSessionId(id);
     setSessionIndex((i) => i + 1);
     setMessages([]);
@@ -78,8 +88,11 @@ export function ChatWindow() {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || !isConnected || !address) return;
-    if (!activeSessionId) return;
+    if (!text || !isConnected || !address || !activeSessionId) return;
+    if (!executor) {
+      alert('No executor available — TEEServiceRegistry returned no valid nodes.');
+      return;
+    }
 
     setInput('');
 
@@ -91,22 +104,35 @@ export function ChatWindow() {
 
     try {
       if (!keysReady) await deriveKeys();
-      const encrypted = await encrypt(text);
+
+      // Build sovereign agent input — frontend encodes full 23-field ABI
+      const agentInput = encodeSovereignAgentInput({
+        executor: executor.teeAddress,
+        userPublicKey: derivedPublicKey ? `0x${derivedPublicKey}` : '0x',
+        prompt: text,
+        encryptedSecrets: '0x', // ZeroClaw + ritual provider needs no API key
+        convoHistoryRef: ['', '', ''],      // DA ref (empty for MVP — no history persistence)
+        systemPromptRef: ['', '', ''],      // DA ref (empty for MVP)
+      });
 
       setMessages((prev) =>
         prev.map((m) => (m.id === userMsgId ? { ...m, status: 'delivered' } : m)),
       );
 
-      const hash = await sendEncryptedMessage(activeSessionId, encrypted);
+      const hash = await sendMessage(activeSessionId, agentInput);
       setPendingTxHash(hash);
-    } catch (err) {
+    } catch (err: any) {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === userMsgId ? { ...m, content: text, status: 'error' } : m,
         ),
       );
+      onFailed(err?.message ?? 'Send failed');
     }
-  }, [input, isConnected, address, activeSessionId, keysReady, deriveKeys, encrypt, sendEncryptedMessage]);
+  }, [
+    input, isConnected, address, activeSessionId, executor,
+    keysReady, deriveKeys, derivedPublicKey, sendMessage, onFailed,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -118,66 +144,81 @@ export function ChatWindow() {
     [handleSend],
   );
 
+  const isBusy = !['IDLE', 'SETTLED', 'FAILED', 'EXPIRED'].includes(status);
+
   return (
-    <div className="flex h-full">
-      <SessionList
-        activeSessionId={activeSessionId}
-        onSelectSession={(id) => { setActiveSessionId(id); setMessages([]); reset(); }}
-        onNewSession={startNewSession}
-      />
+    <ChainGuard>
+      <div className="flex h-full">
+        <SessionList
+          activeSessionId={activeSessionId}
+          onSelectSession={(id) => { setActiveSessionId(id); setMessages([]); reset(); }}
+          onNewSession={startNewSession}
+        />
 
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {!activeSessionId && (
-            <div className="h-full flex items-center justify-center">
-              <div className="text-center space-y-2">
-                <p className="font-serif text-vault-text/60 text-lg">Your mind, your chain, your keys.</p>
-                <p className="font-mono text-vault-muted text-xs">Start a new session to begin.</p>
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {!activeSessionId && (
+              <div className="h-full flex items-center justify-center">
+                <div className="text-center space-y-2">
+                  <p className="font-serif text-vault-text/60 text-lg">Your mind, your chain, your keys.</p>
+                  <p className="font-mono text-vault-muted text-xs">Start a new session to begin.</p>
+                  {!executor && (
+                    <p className="font-mono text-amber-400 text-xs">
+                      Warning: no executor found in TEEServiceRegistry
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-          <div ref={bottomRef} />
-        </div>
+            )}
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+            <div ref={bottomRef} />
+          </div>
 
-        {/* Status + Input */}
-        <div className="border-t border-vault-border px-4 py-3 space-y-2 bg-vault-surface/50">
-          <TxStateIndicator state={txState} />
-          <div className="flex items-end gap-3">
-            <textarea
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={!activeSessionId || txState === 'ENCRYPTING' || txState === 'SUBMITTING' || txState === 'PENDING' || txState === 'PROCESSING'}
-              placeholder={activeSessionId ? 'Share what's on your mind…' : 'Select or start a session first'}
-              className="
-                flex-1 resize-none bg-vault-surface border border-vault-border rounded-xl
-                px-4 py-3 text-sm text-vault-text placeholder:text-vault-muted
-                focus:outline-none focus:border-vault-teal/50 focus:ring-1 focus:ring-vault-teal/20
-                disabled:opacity-40 transition-shadow font-sans
-                animate-breathe
-              "
-              style={{ maxHeight: '120px', overflowY: 'auto', lineHeight: '1.5' }}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || !activeSessionId || txState === 'ENCRYPTING' || txState === 'SUBMITTING' || txState === 'PENDING' || txState === 'PROCESSING'}
-              className="
-                px-4 py-3 rounded-xl bg-vault-teal/15 border border-vault-teal/30
-                text-vault-teal font-mono text-sm
-                hover:bg-vault-teal/25 disabled:opacity-30 disabled:cursor-not-allowed
-                transition-colors shrink-0
-              "
-            >
-              Send
-            </button>
+          {/* Status + Input */}
+          <div className="border-t border-vault-border px-4 py-3 space-y-2 bg-vault-surface/50">
+            <TxStateIndicator state={status} />
+            <div className="flex items-end gap-3">
+              <textarea
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={!activeSessionId || isBusy}
+                placeholder={
+                  !activeSessionId
+                    ? 'Select or start a session first'
+                    : !executor
+                    ? 'No executor available…'
+                    : 'Share what\'s on your mind…'
+                }
+                className="
+                  flex-1 resize-none bg-vault-surface border border-vault-border rounded-xl
+                  px-4 py-3 text-sm text-vault-text placeholder:text-vault-muted
+                  focus:outline-none focus:border-vault-teal/50 focus:ring-1 focus:ring-vault-teal/20
+                  disabled:opacity-40 transition-shadow font-sans
+                  animate-breathe
+                "
+                style={{ maxHeight: '120px', overflowY: 'auto', lineHeight: '1.5' }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || !activeSessionId || isBusy || !executor}
+                className="
+                  px-4 py-3 rounded-xl bg-vault-teal/15 border border-vault-teal/30
+                  text-vault-teal font-mono text-sm
+                  hover:bg-vault-teal/25 disabled:opacity-30 disabled:cursor-not-allowed
+                  transition-colors shrink-0
+                "
+              >
+                Send
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </ChainGuard>
   );
 }

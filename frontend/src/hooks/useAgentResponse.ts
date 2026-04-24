@@ -5,9 +5,11 @@ import { useCallback, useRef } from 'react';
 import { MINDVAULT_ROUTER_ADDRESS, MINDVAULT_ROUTER_ABI } from '@/lib/contracts';
 
 export interface AgentResponseEvent {
-  user: `0x${string}`;
+  jobId: `0x${string}`;
   sessionId: `0x${string}`;
-  encryptedResponse: `0x${string}`;
+  success: boolean;
+  text: string;    // plaintext response, or ECIES-encrypted if userPublicKey was set
+  error: string;
 }
 
 export function useAgentResponse(
@@ -20,9 +22,9 @@ export function useAgentResponse(
   const handleLogs = useCallback(
     (logs: any[]) => {
       for (const log of logs) {
-        const { user, sessionId: logSessionId, encryptedResponse } = log.args;
+        const { jobId, sessionId: logSessionId, success, text, error } = log.args;
         if (!sessionId || logSessionId === sessionId) {
-          onResponseRef.current({ user, sessionId: logSessionId, encryptedResponse });
+          onResponseRef.current({ jobId, sessionId: logSessionId, success, text, error });
         }
       }
     },
@@ -32,7 +34,7 @@ export function useAgentResponse(
   useWatchContractEvent({
     address: MINDVAULT_ROUTER_ADDRESS,
     abi: MINDVAULT_ROUTER_ABI,
-    eventName: 'ResponseReceived',
+    eventName: 'AgentResponse',
     args: sessionId ? { sessionId } : undefined,
     onLogs: handleLogs,
     enabled: !!sessionId,

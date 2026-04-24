@@ -1,14 +1,20 @@
 import http from 'http';
 import { createPublicClient, webSocket } from 'viem';
-import { ritualChain, MINDVAULT_ROUTER_ADDRESS, RESPONSE_RECEIVED_ABI, SSE_PORT } from './config.js';
+import {
+  ritualChain,
+  MINDVAULT_ROUTER_ADDRESS,
+  AGENT_RESPONSE_ABI,
+  SSE_PORT,
+} from './config.js';
 import { startHealthServer } from './health.js';
 
+// WebSocket client — wss://rpc.ritualfoundation.org/ws (note /ws suffix)
 const client = createPublicClient({
   chain: ritualChain,
-  transport: webSocket('wss://rpc.ritualfoundation.org'),
+  transport: webSocket('wss://rpc.ritualfoundation.org/ws'),
 });
 
-// sessionId (hex) -> Set of active SSE response writers
+// sessionId → Set of active SSE response writers
 const subscribers = new Map<string, Set<http.ServerResponse>>();
 
 function subscribe(sessionId: string, res: http.ServerResponse) {
@@ -34,21 +40,25 @@ function broadcast(sessionId: string, data: object) {
 }
 
 async function startIndexer() {
-  console.log('[indexer] Connecting to Ritual Chain…');
+  console.log('[indexer] Connecting to Ritual Chain via WebSocket…');
 
-  const unwatch = client.watchContractEvent({
+  client.watchContractEvent({
     address: MINDVAULT_ROUTER_ADDRESS,
-    abi: RESPONSE_RECEIVED_ABI,
-    eventName: 'ResponseReceived',
+    abi: AGENT_RESPONSE_ABI,
+    eventName: 'AgentResponse',
     onLogs: (logs) => {
       for (const log of logs) {
-        const { user, sessionId, encryptedResponse } = log.args as {
-          user: string;
+        const { jobId, sessionId, success, text, error } = log.args as {
+          jobId: string;
           sessionId: string;
-          encryptedResponse: string;
+          success: boolean;
+          text: string;
+          error: string;
         };
-        console.log(`[indexer] ResponseReceived  session=${sessionId}  user=${user}`);
-        broadcast(sessionId, { user, sessionId, encryptedResponse, block: log.blockNumber?.toString() });
+        console.log(
+          `[indexer] AgentResponse  session=${sessionId}  success=${success}  job=${jobId}`,
+        );
+        broadcast(sessionId, { jobId, sessionId, success, text, error, block: log.blockNumber?.toString() });
       }
     },
     onError: (err) => {
@@ -56,8 +66,7 @@ async function startIndexer() {
     },
   });
 
-  console.log(`[indexer] Watching ${MINDVAULT_ROUTER_ADDRESS} for ResponseReceived events`);
-  return unwatch;
+  console.log(`[indexer] Watching ${MINDVAULT_ROUTER_ADDRESS} for AgentResponse events`);
 }
 
 // SSE endpoint: GET /events/:sessionId
@@ -77,7 +86,7 @@ const server = http.createServer((req, res) => {
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
     });
-    res.write(':\n\n'); // SSE comment to confirm connection
+    res.write(':\n\n'); // SSE keep-alive comment to confirm connection
 
     subscribe(sessionId, res);
     req.on('close', () => unsubscribe(sessionId, res));

@@ -2,12 +2,12 @@ import { defineChain } from 'viem';
 
 export const ritualChain = defineChain({
   id: 1979,
-  name: 'Ritual Chain',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  name: 'Ritual',
+  nativeCurrency: { name: 'RITUAL', symbol: 'RITUAL', decimals: 18 },
   rpcUrls: {
     default: {
       http: ['https://rpc.ritualfoundation.org'],
-      webSocket: ['wss://rpc.ritualfoundation.org'],
+      webSocket: ['wss://rpc.ritualfoundation.org/ws'], // note: /ws suffix required
     },
   },
   testnet: true,
@@ -17,16 +17,20 @@ export const MINDVAULT_ROUTER_ADDRESS = (
   process.env.ROUTER_ADDRESS ?? '0x0000000000000000000000000000000000000000'
 ) as `0x${string}`;
 
-export const RESPONSE_RECEIVED_ABI = [
+// AgentResponse(bytes32 indexed jobId, bytes32 indexed sessionId, bool success, string text, string error)
+export const AGENT_RESPONSE_ABI = [
   {
     type: 'event',
-    name: 'ResponseReceived',
+    name: 'AgentResponse',
     inputs: [
-      { name: 'user', type: 'address', indexed: true },
-      { name: 'sessionId', type: 'bytes32', indexed: true },
-      { name: 'encryptedResponse', type: 'bytes', indexed: false },
+      { name: 'jobId',     type: 'bytes32', indexed: true  },
+      { name: 'sessionId', type: 'bytes32', indexed: true  },
+      { name: 'success',   type: 'bool',    indexed: false },
+      { name: 'text',      type: 'string',  indexed: false },
+      { name: 'error',     type: 'string',  indexed: false },
     ],
   },
 ] as const;
 
-export const SSE_PORT = Number(process.env.PORT ?? 3001);
+export const SSE_PORT    = Number(process.env.PORT        ?? 3001);
+export const HEALTH_PORT = Number(process.env.HEALTH_PORT ?? 3002);
