@@ -2,6 +2,35 @@ export const MINDVAULT_ROUTER_ADDRESS = (
   process.env.NEXT_PUBLIC_ROUTER_ADDRESS ?? '0x0000000000000000000000000000000000000000'
 ) as `0x${string}`;
 
+export const MINDVAULT_FACTORY_ADDRESS = (
+  process.env.NEXT_PUBLIC_FACTORY_ADDRESS ?? '0x0000000000000000000000000000000000000000'
+) as `0x${string}`;
+
+export const MINDVAULT_FACTORY_ABI = [
+  {
+    type: 'function',
+    name: 'deploy',
+    inputs: [],
+    outputs: [{ name: 'harness', type: 'address' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'harnessOf',
+    inputs: [{ name: 'user', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'event',
+    name: 'HarnessDeployed',
+    inputs: [
+      { name: 'user',    type: 'address', indexed: true },
+      { name: 'harness', type: 'address', indexed: true },
+    ],
+  },
+] as const;
+
 export const MINDVAULT_ROUTER_ABI = [
   {
     type: 'constructor',

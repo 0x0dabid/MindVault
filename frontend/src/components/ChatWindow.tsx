@@ -11,12 +11,15 @@ import { useMindVault } from '@/hooks/useMindVault';
 import { useEncryption } from '@/hooks/useEncryption';
 import { useAgentResponse } from '@/hooks/useAgentResponse';
 import { useExecutor } from '@/hooks/useExecutor';
+import { useHarness } from '@/hooks/useHarness';
 import { encodeSovereignAgentInput } from '@/lib/sovereign-agent';
 
 let messageCounter = 0;
 function newId() {
   return `msg-${++messageCounter}`;
 }
+
+const SESSION_STORAGE_KEY = (sessionId: string) => `mv-msgs-${sessionId}`;
 
 export function ChatWindow() {
   const { address, isConnected } = useAccount();
@@ -25,13 +28,35 @@ export function ChatWindow() {
   const [activeSessionId, setActiveSessionId] = useState<`0x${string}` | null>(null);
   const [sessionIndex, setSessionIndex] = useState(0);
   const [pendingTxHash, setPendingTxHash] = useState<`0x${string}` | undefined>();
+  const [deployingHarness, setDeployingHarness] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const { status, sendMessage, onCommitted, onProcessing, onPendingSettlement, onSettled, onFailed, reset } = useMindVault();
+  const { harnessAddress, hasHarness, factoryDeployed, isDeploying, deployHarness, refetch } = useHarness();
+  const { status, sendMessage, onCommitted, onProcessing, onPendingSettlement, onSettled, onFailed, reset } =
+    useMindVault(harnessAddress);
   const { encrypt, decrypt, keysReady, deriveKeys, derivedPublicKey } = useEncryption();
   const { executor } = useExecutor();
 
   const { isSuccess: txConfirmed } = useWaitForTransactionReceipt({ hash: pendingTxHash });
+
+  // Restore messages from localStorage when session changes
+  useEffect(() => {
+    if (!activeSessionId) { setMessages([]); return; }
+    try {
+      const stored = localStorage.getItem(SESSION_STORAGE_KEY(activeSessionId));
+      setMessages(stored ? JSON.parse(stored) : []);
+    } catch {
+      setMessages([]);
+    }
+  }, [activeSessionId]);
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (!activeSessionId || messages.length === 0) return;
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY(activeSessionId), JSON.stringify(messages));
+    } catch {}
+  }, [activeSessionId, messages]);
 
   useEffect(() => {
     if (txConfirmed) {
@@ -50,7 +75,6 @@ export function ChatWindow() {
     ]);
 
     try {
-      // If derivedPublicKey was passed to the agent, response text is ECIES-encrypted
       let content = event.text;
       if (!event.success) {
         content = `[Agent error: ${event.error || 'unknown'}]`;
@@ -82,9 +106,21 @@ export function ChatWindow() {
     const id = keccak256(encodePacked(['address', 'uint256'], [address, BigInt(sessionIndex)]));
     setActiveSessionId(id);
     setSessionIndex((i) => i + 1);
-    setMessages([]);
     reset();
   }, [address, sessionIndex, reset]);
+
+  const handleDeployHarness = useCallback(async () => {
+    setDeployingHarness(true);
+    try {
+      await deployHarness();
+      // refetch is called inside deployHarness; wait a beat for the read to propagate
+      setTimeout(() => refetch(), 2000);
+    } catch (err: any) {
+      alert(`Deploy failed: ${err?.message ?? err}`);
+    } finally {
+      setDeployingHarness(false);
+    }
+  }, [deployHarness, refetch]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -105,9 +141,7 @@ export function ChatWindow() {
     try {
       if (!keysReady) await deriveKeys();
 
-      // Encrypt secrets server-side (12-byte ECIES nonce) and resolve DA refs.
-      // The /api/secrets route encrypts {"LLM_PROVIDER":"ritual",...} to the executor's
-      // public key using eciesjs with the mandatory 12-byte AES-GCM nonce.
+      // Encrypt secrets server-side (12-byte ECIES nonce) and resolve DA + system prompt refs.
       const secretsRes = await fetch('/api/secrets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -116,19 +150,16 @@ export function ChatWindow() {
           sessionId: activeSessionId,
         }),
       });
-      if (!secretsRes.ok) {
-        throw new Error(`Secrets API error ${secretsRes.status}`);
-      }
-      const { encryptedSecrets, convoHistoryRef } = await secretsRes.json();
+      if (!secretsRes.ok) throw new Error(`Secrets API error ${secretsRes.status}`);
+      const { encryptedSecrets, convoHistoryRef, systemPromptRef } = await secretsRes.json();
 
-      // Build sovereign agent input — frontend encodes full 23-field ABI
       const agentInput = encodeSovereignAgentInput({
         executor: executor.teeAddress,
         userPublicKey: derivedPublicKey ? `0x${derivedPublicKey}` : '0x',
         prompt: text,
         encryptedSecrets,
         convoHistoryRef,
-        systemPromptRef: ['', '', ''],
+        systemPromptRef,
       });
 
       setMessages((prev) =>
@@ -167,7 +198,7 @@ export function ChatWindow() {
       <div className="flex h-full">
         <SessionList
           activeSessionId={activeSessionId}
-          onSelectSession={(id) => { setActiveSessionId(id); setMessages([]); reset(); }}
+          onSelectSession={(id) => { setActiveSessionId(id); reset(); }}
           onNewSession={startNewSession}
         />
 
@@ -176,9 +207,30 @@ export function ChatWindow() {
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
             {!activeSessionId && (
               <div className="h-full flex items-center justify-center">
-                <div className="text-center space-y-2">
+                <div className="text-center space-y-3">
                   <p className="font-serif text-vault-text/60 text-lg">Your mind, your chain, your keys.</p>
                   <p className="font-mono text-vault-muted text-xs">Start a new session to begin.</p>
+
+                  {/* Harness deployment prompt */}
+                  {factoryDeployed && !hasHarness && (
+                    <div className="mt-4 p-4 border border-vault-teal/20 rounded-xl text-left max-w-sm mx-auto space-y-2">
+                      <p className="font-mono text-vault-teal text-xs font-semibold">Personal Vault</p>
+                      <p className="font-sans text-vault-text/70 text-xs">
+                        Deploy your own on-chain vault to get a private async job slot.
+                        Without it, all users share one slot.
+                      </p>
+                      <button
+                        onClick={handleDeployHarness}
+                        disabled={deployingHarness || isDeploying}
+                        className="w-full px-3 py-2 rounded-lg bg-vault-teal/15 border border-vault-teal/30
+                          text-vault-teal font-mono text-xs hover:bg-vault-teal/25
+                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {deployingHarness ? 'Deploying…' : 'Deploy Personal Vault'}
+                      </button>
+                    </div>
+                  )}
+
                   {!executor && (
                     <p className="font-mono text-amber-400 text-xs">
                       Warning: no executor found in TEEServiceRegistry
@@ -195,6 +247,11 @@ export function ChatWindow() {
 
           {/* Status + Input */}
           <div className="border-t border-vault-border px-4 py-3 space-y-2 bg-vault-surface/50">
+            {hasHarness && (
+              <p className="font-mono text-vault-teal/50 text-xs">
+                Personal vault active
+              </p>
+            )}
             <TxStateIndicator state={status} />
             <div className="flex items-end gap-3">
               <textarea

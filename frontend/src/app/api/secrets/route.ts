@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { encrypt, ECIES_CONFIG } from 'eciesjs';
+import { SOUL_MD } from '@/lib/soul';
 
 // MANDATORY: 12-byte nonce for Ritual ECIES. Do NOT use the default 16.
 ECIES_CONFIG.symmetricNonceLength = 12;
@@ -38,7 +39,14 @@ export async function POST(req: NextRequest) {
         ? ['hf', `${hfRepoId}/${sessionId}/history.jsonl`, 'HF_TOKEN']
         : ['', '', ''];
 
-    return NextResponse.json({ encryptedSecrets, convoHistoryRef });
+    // System prompt: use HF SOUL.md if configured, otherwise embed inline so
+    // the agent has a therapeutic persona even without HF credentials.
+    const systemPromptRef: [string, string, string] =
+      hfToken && hfRepoId
+        ? ['hf', `${hfRepoId}/SOUL.md`, 'HF_TOKEN']
+        : ['inline', SOUL_MD, ''];
+
+    return NextResponse.json({ encryptedSecrets, convoHistoryRef, systemPromptRef });
   } catch (err: any) {
     console.error('[secrets] Encryption failed:', err);
     return NextResponse.json({ error: err?.message ?? 'Internal error' }, { status: 500 });
