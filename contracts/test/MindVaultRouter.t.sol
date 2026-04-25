@@ -42,14 +42,16 @@ contract MindVaultRouterTest is Test {
             abi.encode(false)
         );
 
-        // Valid Sovereign Agent callback result
+        // Valid Sovereign Agent callback result — use contract's SovereignRef struct
+        MindVaultRouter.SovereignRef memory emptyRef = MindVaultRouter.SovereignRef("", "", "");
+        MindVaultRouter.SovereignRef[] memory artifacts = new MindVaultRouter.SovereignRef[](0);
         validResult = abi.encode(
             true,
             "",
             "You are not alone. Let's explore what you're feeling.",
-            ("", "", ""),
-            ("", "", ""),
-            new (string, string, string)[](0)
+            emptyRef,
+            emptyRef,
+            artifacts
         );
     }
 

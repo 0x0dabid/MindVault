@@ -53,6 +53,14 @@ contract MindVaultRouter {
         bytes32 latestJobId;
     }
 
+    // Mirrors the (string,string,string) StorageRef tuple in the Sovereign Agent ABI.
+    // Required for abi.decode — Solidity cannot decode into anonymous tuple arrays.
+    struct SovereignRef {
+        string platform;
+        string path;
+        string keyRef;
+    }
+
     // ─── Events ───────────────────────────────────────────────────────────────
     event SessionCreated(address indexed user, bytes32 indexed sessionId);
     event MessageSent(
@@ -137,7 +145,13 @@ contract MindVaultRouter {
         require(ok, "Sovereign agent call failed");
 
         // Phase 1 response is raw bytes; treat as jobId for tracking
-        bytes32 jobId = output.length >= 32 ? bytes32(output) : keccak256(output);
+        bytes32 jobId;
+        if (output.length >= 32) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            assembly { jobId := mload(add(output, 32)) }
+        } else {
+            jobId = keccak256(output);
+        }
 
         jobToSession[jobId] = sessionId;
         sessions[sessionId].messageCount++;
@@ -186,9 +200,12 @@ contract MindVaultRouter {
         pure
         returns (bool success, string memory agentError, string memory text)
     {
-        (success, agentError, text, , , ) = abi.decode(
+        SovereignRef memory r1;
+        SovereignRef memory r2;
+        SovereignRef[] memory artifacts;
+        (success, agentError, text, r1, r2, artifacts) = abi.decode(
             result,
-            (bool, string, string, (string, string, string), (string, string, string), (string, string, string)[])
+            (bool, string, string, SovereignRef, SovereignRef, SovereignRef[])
         );
     }
 

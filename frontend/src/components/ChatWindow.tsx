@@ -105,14 +105,30 @@ export function ChatWindow() {
     try {
       if (!keysReady) await deriveKeys();
 
+      // Encrypt secrets server-side (12-byte ECIES nonce) and resolve DA refs.
+      // The /api/secrets route encrypts {"LLM_PROVIDER":"ritual",...} to the executor's
+      // public key using eciesjs with the mandatory 12-byte AES-GCM nonce.
+      const secretsRes = await fetch('/api/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          executorPublicKey: executor.publicKey,
+          sessionId: activeSessionId,
+        }),
+      });
+      if (!secretsRes.ok) {
+        throw new Error(`Secrets API error ${secretsRes.status}`);
+      }
+      const { encryptedSecrets, convoHistoryRef } = await secretsRes.json();
+
       // Build sovereign agent input — frontend encodes full 23-field ABI
       const agentInput = encodeSovereignAgentInput({
         executor: executor.teeAddress,
         userPublicKey: derivedPublicKey ? `0x${derivedPublicKey}` : '0x',
         prompt: text,
-        encryptedSecrets: '0x', // ZeroClaw + ritual provider needs no API key
-        convoHistoryRef: ['', '', ''],      // DA ref (empty for MVP — no history persistence)
-        systemPromptRef: ['', '', ''],      // DA ref (empty for MVP)
+        encryptedSecrets,
+        convoHistoryRef,
+        systemPromptRef: ['', '', ''],
       });
 
       setMessages((prev) =>
