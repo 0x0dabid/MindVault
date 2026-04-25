@@ -2,17 +2,22 @@
 
 import type { AsyncTxStatus } from '@/hooks/useMindVault';
 
-const STATE_CONFIG: Record<AsyncTxStatus, { label: string; color: string; pulse?: boolean }> = {
-  IDLE:                { label: '',                                     color: ''                },
-  SUBMITTING:          { label: 'Awaiting wallet signature…',           color: 'text-vault-teal', pulse: true  },
-  PENDING_COMMITMENT:  { label: 'Transaction submitted…',               color: 'text-blue-400',   pulse: true  },
-  COMMITTED:           { label: 'Committed — executor notified',        color: 'text-green-400'               },
-  EXECUTOR_PROCESSING: { label: 'Agent is thinking…',                   color: 'text-vault-teal', pulse: true  },
-  RESULT_READY:        { label: 'Phase 1 settled — delivering result…', color: 'text-vault-teal', pulse: true  },
-  PENDING_SETTLEMENT:  { label: 'Decrypting response…',                 color: 'text-vault-teal', pulse: true  },
-  SETTLED:             { label: 'Complete',                             color: 'text-green-400'               },
-  FAILED:              { label: 'Failed',                               color: 'text-red-400'                 },
-  EXPIRED:             { label: 'Job expired — please retry',           color: 'text-orange-400'              },
+// 9-state async lifecycle — icons and colors from ritual-dapp-design skill.
+// Pink = AI/agent processing. Gold = pending/waiting. Green = settled/done.
+const STATE_CONFIG: Record<
+  AsyncTxStatus,
+  { label: string; icon: string; color: string; pulse: boolean }
+> = {
+  IDLE:                { label: '',                                     icon: '',  color: '',                     pulse: false },
+  SUBMITTING:          { label: 'Awaiting signature…',                  icon: '·', color: 'text-gray-400',        pulse: true  },
+  PENDING_COMMITMENT:  { label: 'Awaiting executor…',                   icon: '◌', color: 'text-ritual-gold',     pulse: true  },
+  COMMITTED:           { label: 'Committed to executor',                icon: '◉', color: 'text-ritual-gold',     pulse: false },
+  EXECUTOR_PROCESSING: { label: 'Agent is thinking…',                   icon: '⟳', color: 'text-ritual-pink',    pulse: true  },
+  RESULT_READY:        { label: 'Result ready — settling…',             icon: '◈', color: 'text-ritual-green',    pulse: false },
+  PENDING_SETTLEMENT:  { label: 'Delivering response…',                 icon: '◎', color: 'text-ritual-gold',     pulse: false },
+  SETTLED:             { label: 'Complete',                             icon: '✓', color: 'text-ritual-green',    pulse: false },
+  FAILED:              { label: 'Failed',                               icon: '✗', color: 'text-red-400',         pulse: false },
+  EXPIRED:             { label: 'Job expired — retry',                  icon: '⊘', color: 'text-gray-500',        pulse: false },
 };
 
 interface TxStateIndicatorProps {
@@ -20,20 +25,24 @@ interface TxStateIndicatorProps {
 }
 
 export function TxStateIndicator({ state }: TxStateIndicatorProps) {
-  const config = STATE_CONFIG[state];
-  if (!config.label) return null;
+  const cfg = STATE_CONFIG[state];
+  if (!cfg.label) return null;
 
   return (
-    <div className={`flex items-center gap-2 font-mono text-xs ${config.color}`}>
-      {config.pulse ? (
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-60" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-current" />
+    <div
+      role="status"
+      aria-label={`Job status: ${cfg.label}`}
+      className={`flex items-center gap-2 font-mono text-xs ${cfg.color}`}
+    >
+      {cfg.pulse ? (
+        <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
+          <span className="animate-ping absolute inset-0 rounded-full bg-current opacity-50" />
+          <span className="relative rounded-full h-2 w-2 bg-current" />
         </span>
       ) : (
-        <span className="h-2 w-2 rounded-full bg-current" />
+        <span className="shrink-0 leading-none" aria-hidden="true">{cfg.icon}</span>
       )}
-      {config.label}
+      <span>{cfg.label}</span>
     </div>
   );
 }

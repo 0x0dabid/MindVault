@@ -3,12 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0A0A0F;
-  --surface: #12121A;
-  --border: #1E1E2E;
-  --teal: #5EEAD4;
-  --text: #E8E8ED;
-  --muted: #6B7280;
+  --font-display: 'Archivo Black', system-ui, sans-serif;
+  --font-body:    'Barlow', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
 }
 
 * {
@@ -17,51 +14,57 @@
   padding: 0;
 }
 
-html,
-body {
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: system-ui, sans-serif;
+html, body {
   height: 100%;
 }
 
-/* Subtle noise texture overlay */
+/* Subtle noise grain texture — atmosphere over brightness (ritual-dapp-design) */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
   pointer-events: none;
   z-index: 0;
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 4px;
-}
-::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 2px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+/* Minimal scrollbars */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0F1117; }
+::-webkit-scrollbar-thumb { background: #1A1D2A; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #6B7085; }
+
+/* Section gradient divider utility */
+.divider-green {
+  height: 1px;
+  background: linear-gradient(to right, rgba(25,209,132,0.3), rgba(26,29,42,0.5), transparent);
 }
 
-/* RainbowKit modal dark override */
+/* RainbowKit dark theme overrides */
 [data-rk] {
-  --rk-colors-modalBackground: #12121A !important;
-  --rk-colors-modalBorder: #1E1E2E !important;
+  --rk-colors-modalBackground: #0F1117 !important;
+  --rk-colors-modalBorder: #1A1D2A !important;
   --rk-colors-modalText: #E8E8ED !important;
-  --rk-colors-accentColor: #5EEAD4 !important;
-  --rk-colors-accentColorForeground: #0A0A0F !important;
+  --rk-colors-accentColor: #19D184 !important;
+  --rk-colors-accentColorForeground: #000000 !important;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .text-balance { text-wrap: balance; }
+
+  /* Ritual focus ring — all interactive elements */
+  .focus-ritual {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ritual-green/50
+           focus-visible:ring-offset-2 focus-visible:ring-offset-black;
   }
 }
