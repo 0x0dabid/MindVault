@@ -31,6 +31,32 @@ export const MINDVAULT_FACTORY_ABI = [
   },
 ] as const;
 
+// Harness ABI — subset used for reading session data.
+// MindVaultHarness stores sessions without a user field (it's per-owner).
+export const MINDVAULT_HARNESS_SESSION_ABI = [
+  {
+    type: 'function',
+    name: 'getSessionIds',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getSession',
+    inputs: [{ name: 'sessionId', type: 'bytes32' }],
+    outputs: [{
+      name: '', type: 'tuple',
+      components: [
+        { name: 'startedAt',    type: 'uint256' },
+        { name: 'messageCount', type: 'uint256' },
+        { name: 'latestJobId',  type: 'bytes32' },
+      ],
+    }],
+    stateMutability: 'view',
+  },
+] as const;
+
 export const MINDVAULT_ROUTER_ABI = [
   {
     type: 'constructor',
